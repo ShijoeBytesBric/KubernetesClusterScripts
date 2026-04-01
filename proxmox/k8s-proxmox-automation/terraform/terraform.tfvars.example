@@ -1,0 +1,45 @@
+# Copy this file to terraform.tfvars and fill in your values
+# terraform.tfvars is gitignored — never commit secrets
+
+# ── Proxmox connection ──────────────────────────────────────
+proxmox_api_url          = "https://192.168.1.10:8006/api2/json"
+proxmox_api_token_id     = "root@pam!terraform"
+proxmox_api_token_secret = "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+proxmox_node             = "pve"
+
+# ── Template & storage ─────────────────────────────────────
+lxc_template = "local:vztmpl/ubuntu-25.04-standard_25.04-1.1_amd64.tar.zst"
+storage_pool = "local-lvm"
+
+# ── Network ────────────────────────────────────────────────
+network_bridge      = "vmbr0"
+network_gateway     = "192.168.1.1"
+network_cidr_prefix = 24
+dns_server          = "192.168.1.1"
+
+# ── Master nodes ───────────────────────────────────────────
+master_count    = 1        # set 3 for HA control plane
+master_id_start = 200      # container IDs: 200, 201, 202
+master_ip_base  = "192.168.1"
+master_ip_start = 30       # IPs: .30, .31, .32
+master_cores    = 2
+master_memory   = 4096
+master_disk_size = 30
+
+# ── Worker nodes ───────────────────────────────────────────
+worker_count    = 2        # scale as needed
+worker_id_start = 210      # container IDs: 210, 211, ...
+worker_ip_base  = "192.168.1"
+worker_ip_start = 40       # IPs: .40, .41, ...
+worker_cores    = 2
+worker_memory   = 4096
+worker_disk_size = 30
+
+# ── Kubernetes ─────────────────────────────────────────────
+k8s_version      = "1.31"
+pod_network_cidr = "10.244.0.0/16"   # must NOT overlap with 192.168.x.x
+calico_version   = "3.28.2"
+
+# ── Access ─────────────────────────────────────────────────
+root_password  = "KubeAdmin@2024!"
+ssh_public_key = "ssh-ed25519 AAAA... you@host"  # leave "" to skip
