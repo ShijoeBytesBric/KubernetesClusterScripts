@@ -15,6 +15,9 @@ Ansible   → containerd + kubeadm + Calico + node join
 deploy.sh → chains all steps end-to-end
 ```
 
+## References
+https://github.com/justmeandopensource/kubernetes/blob/master/lxd-provisioning/bootstrap-kube.sh
+
 ---
 
 ## Prerequisites
