@@ -1,0 +1,7 @@
+k8s_version: "1.31"
+pod_network_cidr: "10.244.0.0/16"
+calico_version: "3.28.2"
+containerd_config_path: /etc/containerd/config.toml
+ansible_python_interpreter: /usr/bin/python3
+ansible_ssh_common_args: "-o StrictHostKeyChecking=no"
+ansible_ssh_private_key_file: "~/.ssh/k8s_proxmox"

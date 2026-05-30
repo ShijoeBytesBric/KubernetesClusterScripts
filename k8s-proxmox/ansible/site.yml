@@ -1,0 +1,48 @@
+- name: Bootstrap all cluster nodes
+  hosts: k8s_cluster
+  roles: [common]
+  tags: [common, bootstrap]
+
+- name: Configure Kubernetes master
+  hosts: masters
+  serial: 1
+  roles: [master]
+  tags: [master, control-plane]
+
+- name: Join worker nodes
+  hosts: workers
+  roles: [worker]
+  tags: [worker]
+
+- name: Verify cluster health
+  hosts: "{{ groups['masters'][0] }}"
+  tags: [verify]
+  tasks:
+    - name: Wait for all nodes to be Ready
+      shell: kubectl get nodes --no-headers | grep -v Ready | wc -l
+      environment:
+        KUBECONFIG: /root/.kube/config
+      register: not_ready
+      retries: 40
+      delay: 15
+      until: not_ready.stdout == "0"
+
+    - name: Show node status
+      shell: kubectl get nodes -o wide
+      environment:
+        KUBECONFIG: /root/.kube/config
+      register: nodes
+
+    - name: Print nodes
+      debug:
+        msg: "{{ nodes.stdout_lines }}"
+
+    - name: Show all pods
+      shell: kubectl get pods -A
+      environment:
+        KUBECONFIG: /root/.kube/config
+      register: pods
+
+    - name: Print pods
+      debug:
+        msg: "{{ pods.stdout_lines }}"

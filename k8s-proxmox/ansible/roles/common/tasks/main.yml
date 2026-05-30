@@ -1,0 +1,119 @@
+- name: Update apt cache
+  apt:
+    update_cache: yes
+    cache_valid_time: 3600
+
+- name: Install essential packages
+  apt:
+    name:
+      - curl
+      - gnupg
+      - apt-transport-https
+      - ca-certificates
+      - net-tools
+      - conntrack
+      - socat
+      - iproute2
+    state: present
+
+- name: Load kernel modules
+  shell: modprobe {{ item }} || true
+  loop:
+    - overlay
+    - br_netfilter
+
+- name: Set sysctl params
+  sysctl:
+    name: "{{ item.key }}"
+    value: "{{ item.value }}"
+    state: present
+    reload: yes
+  loop:
+    - { key: 'net.bridge.bridge-nf-call-iptables',  value: '1' }
+    - { key: 'net.bridge.bridge-nf-call-ip6tables', value: '1' }
+    - { key: 'net.ipv4.ip_forward',                 value: '1' }
+  ignore_errors: true
+
+- name: Disable swap
+  shell: swapoff -a
+  ignore_errors: true
+
+- name: Comment out swap in fstab
+  replace:
+    path: /etc/fstab
+    regexp: '^([^#].*\sswap\s.*)$'
+    replace: '# \1'
+
+- name: Add Docker apt key
+  shell: |
+    curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg --yes
+  args:
+    creates: /etc/apt/keyrings/docker.gpg
+
+- name: Add Docker apt repo
+  shell: |
+    echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu noble stable" > /etc/apt/sources.list.d/docker.list
+  args:
+    creates: /etc/apt/sources.list.d/docker.list
+
+- name: Install containerd
+  apt:
+    name: containerd.io
+    state: present
+    update_cache: yes
+
+- name: Create containerd config directory
+  file:
+    path: /etc/containerd
+    state: directory
+
+- name: Generate and configure containerd config
+  shell: |
+    containerd config default > /etc/containerd/config.toml
+    sed -i 's/SystemdCgroup = false/SystemdCgroup = true/' /etc/containerd/config.toml
+
+- name: Restart containerd
+  systemd:
+    name: containerd
+    state: restarted
+    enabled: yes
+
+- name: Add Kubernetes apt key
+  shell: |
+    curl -fsSL https://pkgs.k8s.io/core:/stable:/v{{ k8s_version }}/deb/Release.key | gpg --dearmor -o /etc/apt/keyrings/kubernetes.gpg --yes
+  args:
+    creates: /etc/apt/keyrings/kubernetes.gpg
+
+- name: Add Kubernetes apt repo
+  shell: |
+    echo "deb [signed-by=/etc/apt/keyrings/kubernetes.gpg] https://pkgs.k8s.io/core:/stable:/v{{ k8s_version }}/deb/ /" > /etc/apt/sources.list.d/kubernetes.list
+  args:
+    creates: /etc/apt/sources.list.d/kubernetes.list
+
+- name: Install Kubernetes packages
+  apt:
+    name:
+      - kubelet
+      - kubeadm
+      - kubectl
+    state: present
+    update_cache: yes
+
+- name: Hold Kubernetes packages
+  dpkg_selections:
+    name: "{{ item }}"
+    selection: hold
+  loop:
+    - kubelet
+    - kubeadm
+    - kubectl
+
+- name: Set kubelet extra args for LXC
+  copy:
+    dest: /etc/default/kubelet
+    content: 'KUBELET_EXTRA_ARGS=--fail-swap-on=false'
+
+- name: Enable kubelet
+  systemd:
+    name: kubelet
+    enabled: yes

@@ -1,0 +1,122 @@
+- name: Check if cluster already initialized
+  stat:
+    path: /etc/kubernetes/admin.conf
+  register: kubeadm_init_done
+
+- name: Pull kubeadm images
+  shell: kubeadm config images pull
+  when: not kubeadm_init_done.stat.exists
+
+- name: Initialize cluster
+  shell: |
+    kubeadm init \
+      --pod-network-cidr={{ pod_network_cidr }} \
+      --ignore-preflight-errors=all \
+      2>&1 | tee /var/log/kubeadm-init.log
+  when: not kubeadm_init_done.stat.exists
+
+- name: Create .kube directory
+  file:
+    path: /root/.kube
+    state: directory
+    mode: '0755'
+
+- name: Copy admin.conf to root kube config
+  copy:
+    src: /etc/kubernetes/admin.conf
+    dest: /root/.kube/config
+    remote_src: yes
+    mode: '0600'
+
+- name: Deploy Calico operator
+  shell: kubectl apply --server-side --force-conflicts -f https://raw.githubusercontent.com/projectcalico/calico/v{{ calico_version }}/manifests/tigera-operator.yaml
+  environment:
+    KUBECONFIG: /root/.kube/config
+
+- name: Deploy Calico custom resources
+  shell: |
+    cat <<YAML | kubectl apply -f -
+    apiVersion: operator.tigera.io/v1
+    kind: Installation
+    metadata:
+      name: default
+    spec:
+      calicoNetwork:
+        ipPools:
+        - blockSize: 26
+          cidr: {{ pod_network_cidr }}
+          encapsulation: VXLANCrossSubnet
+          natOutgoing: Enabled
+          nodeSelector: all()
+    YAML
+  environment:
+    KUBECONFIG: /root/.kube/config
+
+- name: Wait for kube-proxy configmap
+  shell: kubectl get configmap kube-proxy -n kube-system
+  environment:
+    KUBECONFIG: /root/.kube/config
+  register: kube_proxy_cm
+  retries: 20
+  delay: 10
+  until: kube_proxy_cm.rc == 0
+
+- name: Patch kube-proxy for LXC
+  shell: |
+    python3 << 'PYEOF'
+    import json, re, subprocess
+
+    # Get current configmap
+    result = subprocess.run(
+        ['kubectl', 'get', 'configmap', 'kube-proxy', '-n', 'kube-system', '-o', 'json'],
+        capture_output=True, text=True, env={'KUBECONFIG': '/root/.kube/config', 'PATH': '/usr/local/bin:/usr/bin:/bin'}
+    )
+    cm = json.loads(result.stdout)
+    config = cm['data']['config.conf']
+
+    # Apply fixes
+    config = re.sub(r'maxPerCore: \S+', 'maxPerCore: 0', config)
+    config = re.sub(r'min: \d+', 'min: 0', config)
+    config = re.sub(r'mode: ""', 'mode: "iptables"', config)
+
+    cm['data']['config.conf'] = config
+
+    # Write fixed configmap
+    with open('/tmp/kube-proxy-fixed.json', 'w') as f:
+        json.dump(cm, f)
+
+    print("Patched values:")
+    for line in config.split('\n'):
+        if any(x in line for x in ['maxPerCore', '  min:', 'mode:']):
+            print(line)
+    PYEOF
+
+    kubectl apply -f /tmp/kube-proxy-fixed.json
+  environment:
+    KUBECONFIG: /root/.kube/config
+
+- name: Restart kube-proxy pods
+  shell: kubectl rollout restart daemonset/kube-proxy -n kube-system
+  environment:
+    KUBECONFIG: /root/.kube/config
+
+- name: Generate join command
+  shell: kubeadm token create --print-join-command > /joincluster.sh && chmod +x /joincluster.sh
+
+- name: Wait for kube-proxy to be Running
+  shell: kubectl get pods -n kube-system -l k8s-app=kube-proxy --no-headers | grep -v Running | wc -l
+  environment:
+    KUBECONFIG: /root/.kube/config
+  register: proxy_status
+  retries: 20
+  delay: 10
+  until: proxy_status.stdout == "0"
+
+- name: Wait for all control-plane pods to be Running
+  shell: kubectl get pods -n kube-system --field-selector=status.phase!=Running --no-headers | grep -v Completed | wc -l
+  environment:
+    KUBECONFIG: /root/.kube/config
+  register: not_running
+  retries: 40
+  delay: 15
+  until: not_running.stdout == "0"
