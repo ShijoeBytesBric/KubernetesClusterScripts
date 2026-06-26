@@ -1,0 +1,9 @@
+# Terraform local files
+k8s-proxmox/terraform.tfvars
+k8s-proxmox/terraform/terraform.tfvars
+k8s-proxmox/terraform.tfstate
+k8s-proxmox/terraform.tfstate.backup
+k8s-proxmox/.terraform/
+
+# Ansible generated inventory
+k8s-proxmox/ansible/inventory/hosts.ini

@@ -1,0 +1,21 @@
+- name: Check if already joined
+  stat:
+    path: /etc/kubernetes/kubelet.conf
+  register: already_joined
+
+- name: Get join command from master
+  slurp:
+    src: /joincluster.sh
+  delegate_to: "{{ groups['masters'][0] }}"
+  register: join_script
+  when: not already_joined.stat.exists
+
+- name: Execute join command
+  shell: "{{ join_script.content | b64decode | trim }} --ignore-preflight-errors=SystemVerification"
+  when: not already_joined.stat.exists
+
+- name: Ensure kubelet is running
+  systemd:
+    name: kubelet
+    state: started
+    enabled: yes
